@@ -1,21 +1,21 @@
-// lib/screens/ai_chat_screen.dart
-import 'dart:convert';
+// lib/screen/ai_chat_screen.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:google_generative_ai/google_generative_ai.dart';
 
-// API 키 (보안을 위해 실제 앱에서는 이렇게 코드에 직접 넣으면 안 됩니다)
-const String OPENAI_API_KEY = 'YOUR_API_KEY_HERE';
+const String GEMINI_API_KEY = 'AIzaSyDvsJ2RVNKYeBl02CypbO_ymXBF6e0cN8A';
 
-// OpenAI API로 보낼 메시지 형식
+const Color kBg = Color(0xFFFFFBEE);
+const Color kPrimary = Color(0xFFFFD449);
+const Color kText = Color(0xFF111827);
+const Color kMuted = Color(0xFF6B7280);
+const Color kCard = Color(0xFFFFFFFF);
+const Color kBorder = Color(0xFFE5E7EB);
+
 class ChatMessage {
-  final String role; // 'user' 또는 'assistant'
+  final String role; // 'user' 또는 'model'
   final String content;
 
   ChatMessage({required this.role, required this.content});
-
-  Map<String, dynamic> toJson() {
-    return {'role': role, 'content': content};
-  }
 }
 
 class AiChatScreen extends StatefulWidget {
@@ -25,77 +25,66 @@ class AiChatScreen extends StatefulWidget {
 
 class _AiChatScreenState extends State<AiChatScreen> {
   final TextEditingController _textController = TextEditingController();
-  final List<ChatMessage> _messages = []; // 대화 내역 저장
+  final List<ChatMessage> _messages = [];
   bool _isLoading = false;
+
+  late final GenerativeModel _model;
+  late final ChatSession _chat;
 
   @override
   void initState() {
     super.initState();
-    // AI가 먼저 인사하도록 초기 메시지 추가
+
+    // ★ [수정 2] 모델명을 'gemini-1.5-flash'로 변경 (latest 제거하여 안정성 확보)
+    _model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: GEMINI_API_KEY);
+    _chat = _model.startChat();
+
     setState(() {
       _messages.add(
         ChatMessage(
-          role: 'assistant',
-          content: '안녕하세요. 오늘 어떤 감정을 느끼셨나요? 편하게 이야기해주세요.',
+          role: 'model',
+          content: '그럼요. 무슨 일이 있었는지 천천히 이야기해주세요. 저는 항상 당신 편이에요.',
         ),
       );
     });
   }
 
-  // 메시지 전송 및 AI 응답 받기
-  Future<void> _sendMessage() async {
-    if (_textController.text.isEmpty) return;
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
 
-    final userMessage = ChatMessage(
-      role: 'user',
-      content: _textController.text,
-    );
+  Future<void> _sendMessage() async {
+    if (_textController.text.trim().isEmpty) return;
+
+    final userMessageText = _textController.text.trim();
 
     setState(() {
-      _messages.add(userMessage); // 사용자가 보낸 메시지 추가
+      _messages.add(ChatMessage(role: 'user', content: userMessageText));
       _isLoading = true;
     });
 
-    _textController.clear(); // 입력창 비우기
+    _textController.clear();
 
     try {
-      // (1) API 요청 준비
-      final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $OPENAI_API_KEY',
-        },
-        body: jsonEncode({
-          'model': 'gpt-3.5-turbo', // (2) 선택하신 모델
-          // (3) 대화 내역 전체를 API에 전송
-          'messages': _messages.map((msg) => msg.toJson()).toList(),
-        }),
-      );
+      final response = await _chat.sendMessage(Content.text(userMessageText));
+      final aiMessageText = response.text;
 
-      // (4) 응답 처리
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        final aiMessageContent = data['choices'][0]['message']['content'];
-
-        final aiMessage = ChatMessage(
-          role: 'assistant',
-          content: aiMessageContent,
-        );
-        setState(() {
-          _messages.add(aiMessage); // AI 응답 메시지 추가
-        });
-      } else {
-        // 에러 처리
-        print('API Error: ${response.statusCode}');
-        print('API Body: ${response.body}');
-        _showErrorDialog('API 오류가 발생했습니다. (코드: ${response.statusCode})');
+      if (aiMessageText == null) {
+        _showErrorDialog('AI가 응답을 생성하지 못했습니다.');
+        return;
       }
+
+      setState(() {
+        _messages.add(ChatMessage(role: 'model', content: aiMessageText));
+      });
     } catch (e) {
-      // 네트워크 오류 등
       print('Error: $e');
-      _showErrorDialog('오류가 발생했습니다: $e');
+      // ★ [수정 3] 에러 내용이 화면에 보이도록 변경 (그래야 원인을 알 수 있어요)
+      _showErrorDialog(e.toString());
     } finally {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -103,84 +92,200 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   void _showErrorDialog(String message) {
+    // ★ [수정 3] 에러 메시지를 그대로 출력하도록 변경
     setState(() {
-      _messages.add(
-        ChatMessage(role: 'assistant', content: '죄송합니다. 오류가 발생했어요.'),
-      );
+      _messages.add(ChatMessage(role: 'model', content: '오류 발생: $message'));
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('AI 채팅')),
+      backgroundColor: kBg,
+      appBar: AppBar(
+        backgroundColor: kBg,
+        elevation: 0,
+        centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.maybePop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kText),
+        ),
+        title: const Text(
+          'AI chat',
+          style: TextStyle(color: kText, fontWeight: FontWeight.w900),
+        ),
+        actions: [
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.more_vert_rounded, color: kText),
+          ),
+        ],
+      ),
       body: Column(
         children: [
-          // (5) 채팅 내역 (ListView)
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.all(8.0),
-              reverse: false, // 아래부터 쌓이도록 (false가 위부터 쌓임)
-              itemCount: _messages.length,
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              itemCount: _messages.length + (_isLoading ? 1 : 0),
               itemBuilder: (context, index) {
+                if (_isLoading && index == _messages.length) {
+                  return _buildTypingIndicator();
+                }
                 final message = _messages[index];
-                bool isUser = message.role == 'user';
-                return _buildChatBubble(message.content, isUser);
+                return _buildMessage(message);
               },
             ),
           ),
-          if (_isLoading)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: CircularProgressIndicator(),
-            ),
-          // (6) 메시지 입력창
-          _buildTextInput(),
+          _buildComposer(),
         ],
       ),
     );
   }
 
-  // 채팅 말풍선 UI
-  Widget _buildChatBubble(String text, bool isUser) {
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 5.0, horizontal: 8.0),
-        padding: const EdgeInsets.all(12.0),
-        decoration: BoxDecoration(
-          color: isUser ? Colors.blue[100] : Colors.grey[200],
-          borderRadius: BorderRadius.circular(15.0),
-        ),
-        child: Text(text),
+  Widget _buildTypingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _botAvatar(),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: kCard,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: kBorder),
+            ),
+            child: const Text(
+              '...',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: kMuted,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // 메시지 입력창 UI
-  Widget _buildTextInput() {
+  Widget _buildMessage(ChatMessage message) {
+    final isUser = message.role == 'user';
+
+    if (isUser) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 48, right: 0, top: 6, bottom: 6),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: kPrimary,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Text(
+              message.content,
+              style: const TextStyle(
+                color: kText,
+                fontSize: 14,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
-      padding: const EdgeInsets.all(8.0),
+      padding: const EdgeInsets.only(right: 48, left: 0, top: 6, bottom: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          _botAvatar(),
+          const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              controller: _textController,
-              decoration: InputDecoration(
-                hintText: '메시지 입력...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20.0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: kCard,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: kBorder),
+              ),
+              child: Text(
+                message.content,
+                style: const TextStyle(
+                  color: kText,
+                  fontSize: 14,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              onSubmitted: (value) => _sendMessage(),
             ),
           ),
-          SizedBox(width: 8.0),
-          IconButton(
-            icon: Icon(Icons.send),
-            onPressed: _isLoading ? null : _sendMessage, // 로딩 중이면 비활성화
-          ),
         ],
+      ),
+    );
+  }
+
+  Widget _botAvatar() {
+    return CircleAvatar(
+      radius: 18,
+      backgroundColor: const Color(0xFF111827),
+      child: const Icon(
+        Icons.psychology_alt_rounded,
+        color: Colors.white,
+        size: 18,
+      ),
+    );
+  }
+
+  Widget _buildComposer() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: kCard,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: kBorder),
+                ),
+                child: TextField(
+                  controller: _textController,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _isLoading ? null : _sendMessage(),
+                  decoration: const InputDecoration(
+                    hintText: '당신의 이야기를 들려주세요.',
+                    border: InputBorder.none,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: _isLoading ? null : _sendMessage,
+              child: Opacity(
+                opacity: _isLoading ? 0.5 : 1,
+                child: Container(
+                  width: 46,
+                  height: 46,
+                  decoration: const BoxDecoration(
+                    color: kPrimary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.arrow_upward_rounded, color: kText),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
       title: '마음 놓고',
       theme: ThemeData(
         primarySwatch: Colors.blue,
-        scaffoldBackgroundColor: Color(0xFFF8F8F8),
+        scaffoldBackgroundColor: const Color(0xFFF6F6F8),
         bottomNavigationBarTheme: BottomNavigationBarThemeData(
           backgroundColor: Colors.white,
         ),
