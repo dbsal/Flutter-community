@@ -1,4 +1,3 @@
-// lib/screen/main_app_screen.dart
 import 'package:flutter/material.dart';
 import 'package:community/screen/home_screen.dart';
 import 'package:community/screen/ai_chat_screen.dart';

@@ -1,4 +1,3 @@
-// lib/screen/new_post_screen.dart
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,8 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 
-const Color kBg = Color(0xFFFFFBEE); // 크림 배경
-const Color kPrimary = Color(0xFFFFD449); // 포인트 노랑
+const Color kBg = Color(0xFFFFFBEE);
+const Color kPrimary = Color(0xFFFFD449);
 
 class NewPostScreen extends StatefulWidget {
   @override
@@ -114,14 +113,45 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
       // 이미지 업로드
       if (_pickedImage != null) {
+        if (!await _pickedImage!.exists()) {
+          print('파일이 존재하지 않습니다.');
+          throw Exception('Selected file does not exist');
+        }
+        final length = await _pickedImage!.length();
+        print('업로드 파일 크기: $length bytes');
+
         final fileName = DateTime.now().millisecondsSinceEpoch.toString();
-        final ref = FirebaseStorage.instance
+        final storageRef = FirebaseStorage.instance
             .ref()
             .child('post_images')
-            .child('$uid/$fileName.jpg');
+            .child(uid)
+            .child('$fileName.jpg');
 
-        await ref.putFile(_pickedImage!);
-        imageUrl = await ref.getDownloadURL();
+        print('업로드 경로: ${storageRef.fullPath}');
+
+        final uploadTask = storageRef.putData(
+          await _pickedImage!.readAsBytes(),
+        );
+
+        // 업로드 완료 대기
+        final snapshot = await uploadTask;
+
+        print(
+          '업로드 상태: ${snapshot.state}, 전송된 바이트: ${snapshot.bytesTransferred}/${snapshot.totalBytes}',
+        );
+
+        if (snapshot.state == TaskState.success) {
+          // snapshot.ref를 사용하여 URL 가져오기 (경로 불일치 방지)
+          imageUrl = await snapshot.ref.getDownloadURL();
+          print('다운로드 URL 획득 성공: $imageUrl');
+        } else {
+          print('이미지 업로드 실패 상태: ${snapshot.state}');
+          throw FirebaseException(
+            plugin: 'firebase_storage',
+            code: 'upload-failed',
+            message: 'Image upload failed with state: ${snapshot.state}',
+          );
+        }
       }
 
       // Firestore 저장
@@ -181,10 +211,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ✅ 게시글 작성 화면 전체 배경을 크림으로
       backgroundColor: kBg,
       appBar: AppBar(
-        // ✅ 상단바도 크림으로
         backgroundColor: kBg,
         elevation: 0,
         leading: IconButton(
@@ -200,7 +228,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
             child: ElevatedButton(
               onPressed: _isUploading ? null : _savePost,
               style: ElevatedButton.styleFrom(
-                // ✅ 등록 버튼 노랑으로
                 backgroundColor: kPrimary,
                 disabledBackgroundColor: Colors.grey[300],
                 foregroundColor: Colors.black,
@@ -226,7 +253,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
       ),
       body: Column(
         children: [
-          // 🔲 회색 박스 : 글쓰기 + (아래) 선택된 감정 + + 버튼
           Expanded(
             child: Container(
               margin: const EdgeInsets.all(16),
@@ -237,7 +263,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
               ),
               child: Column(
                 children: [
-                  // 위쪽: 글 입력
                   Expanded(
                     child: TextField(
                       controller: _textController,
@@ -249,7 +274,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     ),
                   ),
 
-                  // 이미지 미리보기
                   if (_pickedImage != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
@@ -264,25 +288,63 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       ),
                     ),
 
-                  // 오른쪽 아래 + 버튼 (이미지 추가)
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: GestureDetector(
-                      onTap: _pickImage,
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.add,
-                          size: 24,
-                          color: Colors.black87,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: _selectedEmotions.map((emotion) {
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedEmotions.remove(emotion);
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _getEmotionColor(
+                                    emotion,
+                                  ).withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  emotion,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
                         ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      // 이미지 추가 버튼
+                      GestureDetector(
+                        onTap: _pickImage,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.add,
+                            size: 24,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -291,7 +353,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
           const Divider(height: 1),
 
-          // 감정 칩 선택 영역
           Container(
             padding: const EdgeInsets.all(16),
             child: Wrap(

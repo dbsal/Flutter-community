@@ -1,16 +1,15 @@
-// lib/screen/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:community/screen/new_post_screen.dart';
 import 'package:community/screen/comment_screen.dart';
 
-const Color kBg = Color(0xFFFFFBEE); // 크림 배경
-const Color kPrimary = Color(0xFFFFD449); // 포인트 노랑
-const Color kText = Color(0xFF111827); // 진한 글자
-const Color kMuted = Color(0xFF6B7280); // 회색 글자
-const Color kCard = Color(0xFFFFFFFF); // 카드 흰색
-const Color kBorder = Color(0xFFE5E7EB); // 경계선
+const Color kBg = Color(0xFFFFFBEE);
+const Color kPrimary = Color(0xFFFFD449);
+const Color kText = Color(0xFF111827);
+const Color kMuted = Color(0xFF6B7280);
+const Color kCard = Color(0xFFFFFFFF);
+const Color kBorder = Color(0xFFE5E7EB);
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -23,7 +22,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // 게시글 목록
   List<DocumentSnapshot> _posts = [];
 
-  // 페이지네이션 / 로딩 상태
   bool _isLoading = false;
   bool _hasMore = true;
   DocumentSnapshot? _lastDocument;
@@ -39,7 +37,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchPosts(isRefresh: true);
   }
 
-  // ✅ 새로고침 시 setState 1회로 교체
   Future<void> _fetchPosts({bool isRefresh = false}) async {
     if (_isLoading) return;
 
@@ -107,30 +104,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kBg,
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 72),
-        child: FloatingActionButton.extended(
-          onPressed: _openNewPost,
-          backgroundColor: kPrimary,
-          elevation: 4,
-          icon: const Icon(Icons.add, color: Colors.black87),
-          label: const Text(
-            '내 감정 기록하기',
-            style: TextStyle(
-              color: Colors.black87,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          shape: const StadiumBorder(),
-        ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+
       body: SafeArea(
         child: Column(
           children: [
-            // ✅ (삭제됨) 상단 "오늘 당신의 마음은 어떤가요?" 헤더 카드
-
-            // ✅ 정렬 pill (최신순 / 댓글순)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
@@ -154,17 +131,54 @@ class _HomeScreenState extends State<HomeScreen> {
                       _fetchPosts(isRefresh: true);
                     },
                   ),
+
+                  const Spacer(),
+
+                  GestureDetector(
+                    onTap: _openNewPost,
+                    child: Container(
+                      height: 34,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: kPrimary,
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 2,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      alignment: Alignment.center,
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.add_rounded, size: 16, color: kText),
+                          SizedBox(width: 4),
+                          Text(
+                            '감정 기록',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                              color: kText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
 
-            // ✅ 게시글 리스트
+            // 게시글 리스트
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _onRefresh,
                 child: ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
                   itemCount: _posts.length + 1,
                   itemBuilder: (context, index) {
                     if (index < _posts.length) {
@@ -260,10 +274,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final String heading = content.trim().isEmpty ? doc.id : content.trim();
     final parts = heading.split('\n');
     final title = parts.first;
-    final snippet = (parts.length > 1) ? parts.skip(1).join('\n') : heading;
-
-    final String badge = emotions.isNotEmpty ? emotions.first.toString() : '기록';
-    final Color badgeColor = _getEmotionColor(badge);
+    final snippet = (parts.length > 1) ? parts.skip(1).join('\n') : '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -276,20 +287,16 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 상단 라인
           Row(
             children: [
               Container(
                 width: 26,
                 height: 26,
-                decoration: BoxDecoration(
-                  color: badgeColor.withOpacity(0.25),
-                  shape: BoxShape.circle,
-                ),
+                decoration: BoxDecoration(color: kBg, shape: BoxShape.circle),
               ),
               const SizedBox(width: 8),
               Text(
-                badge,
+                '사용자',
                 style: const TextStyle(
                   fontSize: 13,
                   color: kMuted,
@@ -316,13 +323,15 @@ class _HomeScreenState extends State<HomeScreen> {
               color: kText,
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            snippet,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 14, color: kMuted, height: 1.35),
-          ),
+          if (snippet.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              snippet,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 14, color: kMuted, height: 1.35),
+            ),
+          ],
 
           const SizedBox(height: 12),
 
@@ -338,7 +347,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
           const SizedBox(height: 12),
 
-          // ✅ 하단 카운트 라인: 공감 제거, 댓글만 유지
           Row(
             children: [
               GestureDetector(

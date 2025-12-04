@@ -96,7 +96,6 @@ class _CommentScreenState extends State<CommentScreen> {
               stream: _firestore
                   .collection('comment')
                   .where('postId', isEqualTo: widget.postId)
-                  // ✅ 최신 댓글이 위로 오도록 변경
                   .orderBy('timestamp', descending: true)
                   .snapshots(),
               builder: (context, snapshot) {

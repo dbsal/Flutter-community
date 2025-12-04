@@ -1,8 +1,9 @@
-// lib/screen/ai_chat_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-const String GEMINI_API_KEY = 'AIzaSyDvsJ2RVNKYeBl02CypbO_ymXBF6e0cN8A';
+const String GEMINI_API_KEY = 'AIzaSyDVjH_4If-URMTbc1OH08bt90YrvfMHKE8';
 
 const Color kBg = Color(0xFFFFFBEE);
 const Color kPrimary = Color(0xFFFFD449);
@@ -12,7 +13,7 @@ const Color kCard = Color(0xFFFFFFFF);
 const Color kBorder = Color(0xFFE5E7EB);
 
 class ChatMessage {
-  final String role; // 'user' 또는 'model'
+  final String role;
   final String content;
 
   ChatMessage({required this.role, required this.content});
@@ -27,26 +28,64 @@ class _AiChatScreenState extends State<AiChatScreen> {
   final TextEditingController _textController = TextEditingController();
   final List<ChatMessage> _messages = [];
   bool _isLoading = false;
+  int _userMessageCount = 0;
 
   late final GenerativeModel _model;
-  late final ChatSession _chat;
+  late ChatSession _chat;
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
+    _model = GenerativeModel(model: 'gemini-2.0-flash', apiKey: GEMINI_API_KEY);
+    _initializeChat();
+  }
 
-    // ★ [수정 2] 모델명을 'gemini-1.5-flash'로 변경 (latest 제거하여 안정성 확보)
-    _model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: GEMINI_API_KEY);
-    _chat = _model.startChat();
+  Future<void> _initializeChat() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      _chat = _model.startChat();
+      return;
+    }
 
-    setState(() {
-      _messages.add(
-        ChatMessage(
-          role: 'model',
-          content: '그럼요. 무슨 일이 있었는지 천천히 이야기해주세요. 저는 항상 당신 편이에요.',
-        ),
-      );
-    });
+    setState(() => _isLoading = true);
+
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('ai_chats')
+          .orderBy('timestamp')
+          .get();
+
+      final history = <Content>[];
+      int userMsgCount = 0;
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final role = data['role'] as String;
+        final content = data['content'] as String;
+
+        _messages.add(ChatMessage(role: role, content: content));
+
+        if (role == 'user') {
+          history.add(Content.text(content));
+          userMsgCount++;
+        } else {
+          history.add(Content.model([TextPart(content)]));
+        }
+      }
+
+      _userMessageCount = userMsgCount;
+      _chat = _model.startChat(history: history);
+    } catch (e) {
+      print('대화 기록 불러오기 실패: $e');
+      _chat = _model.startChat();
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -55,17 +94,63 @@ class _AiChatScreenState extends State<AiChatScreen> {
     super.dispose();
   }
 
+  Future<void> _saveMessage(String role, String content) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    try {
+      await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('ai_chats')
+          .add({
+            'role': role,
+            'content': content,
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+    } catch (e) {
+      print('메시지 저장 실패: $e');
+    }
+  }
+
   Future<void> _sendMessage() async {
     if (_textController.text.trim().isEmpty) return;
 
+    // ★ 10회 제한 체크
+    if (_userMessageCount >= 10) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('무료 사용량 초과'),
+          content: const Text('이 이상은 유료결제입니다! 결제를 하시겠어요?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                // 결제 로직 연결 가능
+              },
+              child: const Text('결제하기'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final userMessageText = _textController.text.trim();
+    _textController.clear();
 
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: userMessageText));
       _isLoading = true;
+      _userMessageCount++;
     });
 
-    _textController.clear();
+    _saveMessage('user', userMessageText);
 
     try {
       final response = await _chat.sendMessage(Content.text(userMessageText));
@@ -79,20 +164,71 @@ class _AiChatScreenState extends State<AiChatScreen> {
       setState(() {
         _messages.add(ChatMessage(role: 'model', content: aiMessageText));
       });
+
+      // AI 응답 저장
+      _saveMessage('model', aiMessageText);
     } catch (e) {
       print('Error: $e');
-      // ★ [수정 3] 에러 내용이 화면에 보이도록 변경 (그래야 원인을 알 수 있어요)
       _showErrorDialog(e.toString());
     } finally {
-      if (!mounted) return;
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _resetChat() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('대화 초기화'),
+        content: const Text('모든 대화 기록이 삭제되고 카운트가 초기화됩니다.\n계속하시겠습니까?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('초기화', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final user = _auth.currentUser;
+      if (user != null) {
+        final snapshot = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('ai_chats')
+            .get();
+
+        for (var doc in snapshot.docs) {
+          await doc.reference.delete();
+        }
+      }
+
       setState(() {
+        _messages.clear();
+        _userMessageCount = 0;
+        _chat = _model.startChat();
         _isLoading = false;
       });
+    } catch (e) {
+      print('초기화 실패: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _showErrorDialog(String message) {
-    // ★ [수정 3] 에러 메시지를 그대로 출력하도록 변경
     setState(() {
       _messages.add(ChatMessage(role: 'model', content: '오류 발생: $message'));
     });
@@ -116,8 +252,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.more_vert_rounded, color: kText),
+            onPressed: _resetChat,
+            icon: const Icon(Icons.refresh_rounded, color: kText),
+            tooltip: '대화 초기화',
           ),
         ],
       ),

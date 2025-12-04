@@ -1,6 +1,6 @@
-// lib/my_page/my_page_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 const Color kBg = Color(0xFFFFFBEE);
@@ -10,7 +10,60 @@ const Color kMuted = Color(0xFF6B7280);
 const Color kCard = Color(0xFFFFFFFF);
 const Color kBorder = Color(0xFFE5E7EB);
 
-class MyPageScreen extends StatelessWidget {
+class MyPageScreen extends StatefulWidget {
+  @override
+  _MyPageScreenState createState() => _MyPageScreenState();
+}
+
+class _MyPageScreenState extends State<MyPageScreen> {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  int _postCount = 0;
+  int _commentCount = 0;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCounts();
+  }
+
+  Future<void> _fetchCounts() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      // 게시글 수 조회
+      final postQuery = await _firestore
+          .collection('post')
+          .where('uid', isEqualTo: user.uid)
+          .count()
+          .get();
+
+      // 댓글 수 조회
+      final commentQuery = await _firestore
+          .collection('comment')
+          .where('authorId', isEqualTo: user.uid)
+          .count()
+          .get();
+
+      if (mounted) {
+        setState(() {
+          _postCount = postQuery.count ?? 0;
+          _commentCount = commentQuery.count ?? 0;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('카운트 조회 실패: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -23,7 +76,7 @@ class MyPageScreen extends StatelessWidget {
             _buildProfileSection(context),
             SizedBox(height: 24),
 
-            // 2. 활동 카운트 섹션 (✅ 공감 삭제)
+            // 2. 활동 카운트 섹션
             _buildActivityCounters(),
             SizedBox(height: 24),
 
@@ -170,14 +223,23 @@ class MyPageScreen extends StatelessWidget {
     );
   }
 
-  // ✅ 공감 박스 제거: 작성/댓글 2개만
   Widget _buildActivityCounters() {
     return Row(
       children: [
-        Expanded(child: _buildCounterBox(Icons.edit_note, '작성', '3')),
+        Expanded(
+          child: _buildCounterBox(
+            Icons.edit_note,
+            '게시글',
+            _isLoading ? '-' : '$_postCount',
+          ),
+        ),
         SizedBox(width: 12),
         Expanded(
-          child: _buildCounterBox(Icons.chat_bubble_outline, '댓글', '12'),
+          child: _buildCounterBox(
+            Icons.chat_bubble_outline,
+            '댓글',
+            _isLoading ? '-' : '$_commentCount',
+          ),
         ),
       ],
     );
